@@ -6,8 +6,8 @@ import (
 	"time"
 
 	coreApi "k8s.io/api/core/v1"
-	metaApi "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metaApi "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	_ "k8s.io/apimachinery/pkg/util/wait"
@@ -146,15 +146,15 @@ func (c *Controller) processWorkItem(key string) error {
 	event, namespace := unserializeCacheKey(key)
 
 	switch event {
-		case EventNamespaceAdded:
-			err = c.addReverse(namespace)
-			break
-		case EventNamespaceDeleted:
-			err = c.deleteReverse(namespace)
-			break
-		default:
-			utilruntime.HandleError(fmt.Errorf("unsupported work item with event '%s'", event))
-			return nil
+	case EventNamespaceAdded:
+		err = c.addReverse(namespace)
+		break
+	case EventNamespaceDeleted:
+		err = c.deleteReverse(namespace)
+		break
+	default:
+		utilruntime.HandleError(fmt.Errorf("unsupported work item with event '%s'", event))
+		return nil
 	}
 
 	return err
@@ -169,7 +169,7 @@ func (c *Controller) addReverse(namespace string) error {
 		return nil
 	}
 
-	if ! errors.IsNotFound(err) {
+	if !errors.IsNotFound(err) {
 		return err
 	}
 

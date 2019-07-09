@@ -2,8 +2,9 @@ package main
 
 import (
 	"flag"
-	"reversed-namespaces-kubectrl/pkg/signals"
 	"time"
+
+	"reversed-namespaces-kubectrl/pkg/signals"
 
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
