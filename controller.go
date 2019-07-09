@@ -26,12 +26,12 @@ import (
 const controllerAgentName = "reversed-namespaces-controller"
 
 const (
-	EventNamespaceAdded = "added"
-	EventNamespaceDeleted = "deleted"
-	EventReasonReverseCreated = "ReverseCreated"
-	EventReasonReverseDeleted = "ReverseDeleted"
-	EventMessageReverseCreated = "Reverse namespace created successfully"
-	EventMessageReverseDeleted = "Reverse namespace deleted successfully"
+	EventNamespaceAdded   = "NamespaceAdded"
+	EventNamespaceDeleted = "NamespaceDeleted"
+	EventReverseCreated   = "ReverseCreated"
+	EventReverseDeleted   = "ReverseDeleted"
+	MessageReverseCreated = "Reverse namespace created successfully"
+	MessageReverseDeleted = "Reverse namespace deleted successfully"
 )
 
 type Controller struct {
@@ -65,10 +65,8 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer c.workQueue.ShutDown()
 
-	// Start the informer factories to begin populating the informer caches
 	klog.Infof("Starting %s", controllerAgentName)
 
-	// Wait for the caches to be synced before starting workers
 	klog.Info("Waiting for informer caches to sync")
 	if ok := cache.WaitForCacheSync(stopCh, c.synced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
@@ -86,7 +84,7 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	})
 
 	klog.Info("Starting workers")
-	// Launch workers
+
 	for i := 0; i < numWorkers; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
@@ -96,15 +94,6 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	klog.Info("Shutting down workers")
 
 	return nil
-}
-
-func serializeCacheKey(action string, namespace string) string {
-	return fmt.Sprintf("%s %s", action, namespace)
-}
-
-func unserializeCacheKey(key string) (action string, namespace string) {
-	parts := strings.SplitN(key, " ", 2)
-	return parts[0], parts[1]
 }
 
 // runWorker is a long-running function that will continually consume items from the workqueue.
@@ -148,15 +137,15 @@ func (c *Controller) runWorker() {
 	}
 }
 
-// process a single work item from the queue
+// asynchronously process a single work item from the queue
 func (c *Controller) processWorkItem(key string) error {
 	klog.Infof("Processing '%s'", key)
 
 	var err error
 
-	action, namespace := unserializeCacheKey(key)
+	event, namespace := unserializeCacheKey(key)
 
-	switch action {
+	switch event {
 		case EventNamespaceAdded:
 			err = c.addReverse(namespace)
 			break
@@ -164,7 +153,7 @@ func (c *Controller) processWorkItem(key string) error {
 			err = c.deleteReverse(namespace)
 			break
 		default:
-			utilruntime.HandleError(fmt.Errorf("unsupported work item with action '%s'", action))
+			utilruntime.HandleError(fmt.Errorf("unsupported work item with event '%s'", event))
 			return nil
 	}
 
@@ -194,7 +183,7 @@ func (c *Controller) addReverse(namespace string) error {
 		return err
 	}
 
-	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReasonReverseCreated, EventMessageReverseCreated)
+	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReverseCreated, MessageReverseCreated)
 
 	return nil
 }
@@ -218,9 +207,18 @@ func (c *Controller) deleteReverse(namespace string) error {
 		return err
 	}
 
-	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReasonReverseDeleted, EventMessageReverseDeleted)
+	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReverseDeleted, MessageReverseDeleted)
 
 	return nil
+}
+
+func serializeCacheKey(action string, namespace string) string {
+	return fmt.Sprintf("%s %s", action, namespace)
+}
+
+func unserializeCacheKey(key string) (action string, namespace string) {
+	parts := strings.SplitN(key, " ", 2)
+	return parts[0], parts[1]
 }
 
 func createEventRecorder(kube kubernetes.Interface) record.EventRecorder {
