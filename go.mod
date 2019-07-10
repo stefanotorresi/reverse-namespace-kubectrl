@@ -1,4 +1,4 @@
-module reversed-namespaces-kubectrl
+module reverse-namespace-kubectrl
 
 go 1.12
 

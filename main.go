@@ -4,7 +4,7 @@ import (
 	"flag"
 	"time"
 
-	"reversed-namespaces-kubectrl/pkg/signals"
+	"reverse-namespace-kubectrl/pkg/signals"
 
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -24,7 +24,7 @@ func main() {
 
 	klog.InitFlags(nil)
 
-	stopCh := signals.SetupSignalHandler()
+	stop := signals.SetupSignalHandler()
 
 	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
 	if err != nil {
@@ -37,10 +37,9 @@ func main() {
 	}
 
 	informerFactory := informers.NewSharedInformerFactory(kube, time.Second*30)
-
 	controller := NewController(kube, informerFactory)
 
-	if err = controller.Run(2, stopCh); err != nil {
+	if err = controller.Run(2, stop); err != nil {
 		klog.Fatalf("Error running controller: %s", err.Error())
 	}
 }

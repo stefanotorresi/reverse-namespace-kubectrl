@@ -10,21 +10,19 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
-	coreInformes "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	kubetesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 
-	"reversed-namespaces-kubectrl/pkg/stringutils"
+	"reverse-namespace-kubectrl/pkg/stringutils"
 )
 
 type doubles struct {
 	informerFactory informers.SharedInformerFactory
-	informer		coreInformes.NamespaceInformer
 	client          *kubefake.Clientset
 	clientObjects   []runtime.Object
-	stopCh			chan struct{}
+	stop            chan struct{}
 }
 
 func TestCreatesReverseNamespaces(t *testing.T) {
@@ -32,15 +30,16 @@ func TestCreatesReverseNamespaces(t *testing.T) {
 	doubles := newDoubles(namespaces)
 	SUT := newController(doubles)
 
-	runController(t, SUT, time.Second * 5, doubles.stopCh)
+	runController(t, SUT, time.Second * 2, doubles.stop)
 
 	waitUntilThereAreNActions(doubles.client, 3) // list, watch, create
 
-	action := doubles.client.Actions()[2] // last create is what we want
+	close(doubles.stop)
+
+	actions := doubles.client.Actions()
+	action := actions[2] // last create is what we want
 
 	assertNamespaceCreatedWithName(t, stringutils.Reverse(namespaces[0].Name), action)
-
-	close(doubles.stopCh)
 }
 
 func TestDeletesReverseNamespaces(t *testing.T) {
@@ -51,7 +50,7 @@ func TestDeletesReverseNamespaces(t *testing.T) {
 	doubles := newDoubles(namespaces)
 	SUT := newController(doubles)
 
-	runController(t, SUT, time.Second * 5, doubles.stopCh)
+	runController(t, SUT, time.Second * 2, doubles.stop)
 
 	waitUntilThereAreNActions(doubles.client, 2) // list, watch
 
@@ -59,11 +58,12 @@ func TestDeletesReverseNamespaces(t *testing.T) {
 
 	waitUntilThereAreNActions(doubles.client, 4) // delete, delete
 
-	action := doubles.client.Actions()[3] // last delete is what we want
+	close(doubles.stop)
+
+	actions := doubles.client.Actions()
+	action := actions[3] // last delete is what we want
 
 	assertNamespaceDeleted(t, namespaces[1], action)
-
-	close(doubles.stopCh)
 }
 
 func assertNamespaceCreatedWithName(t *testing.T, name string, action kubetesting.Action) {
@@ -94,14 +94,12 @@ func newDoubles(namespaces []*coreApi.Namespace) *doubles {
 
 	client := fake.NewSimpleClientset(clientObjects...)
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	informer := informerFactory.Core().V1().Namespaces()
 
 	f := &doubles{
-		informer:        informer,
 		informerFactory: informerFactory,
 		client:          client,
 		clientObjects:   clientObjects,
-		stopCh: 		 make(chan struct{}),
+		stop:            make(chan struct{}),
 	}
 
 	return f
@@ -114,16 +112,10 @@ func newController(doubles *doubles) *Controller {
 	return controller
 }
 
-func runController(t *testing.T, controller *Controller, timeout time.Duration, stopCh chan struct{}) {
+func runController(t *testing.T, controller *Controller, timeout time.Duration, stop chan struct{}) {
 	go func() {
-		time.Sleep(timeout)
-		close(stopCh)
-		t.Error("Controller timed out")
-	}()
-
-	go func() {
-		err := controller.Run(1, stopCh)
-		assert.NoError(t, err )
+		err := controller.Run(1, stop)
+		assert.NoError(t, err)
 	}()
 }
 
@@ -136,12 +128,13 @@ func newNamespace(name string) *coreApi.Namespace {
 }
 
 func waitUntilThereAreNActions(client *kubefake.Clientset, n int)  {
-	stopCh := make(chan struct{})
+	stop := make(chan struct{})
 	thereAreNActions := func() {
-		if len(client.Actions()) == n {
-			close(stopCh)
+		actions := client.Actions()
+		if len(actions) == n {
+			close(stop)
 		}
 	}
-	wait.Until(thereAreNActions, time.Millisecond*100, stopCh)
+	wait.Until(thereAreNActions, time.Millisecond*200, stop)
 }
 

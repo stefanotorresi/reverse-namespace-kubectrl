@@ -21,10 +21,10 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
-	"reversed-namespaces-kubectrl/pkg/stringutils"
+	"reverse-namespace-kubectrl/pkg/stringutils"
 )
 
-const controllerAgentName = "reversed-namespaces-controller"
+const controllerAgentName = "reverse-namespace-controller"
 
 const (
 	EventNamespaceAdded   = "NamespaceAdded"
@@ -61,12 +61,14 @@ func NewController(kube kubernetes.Interface, informerFactory informers.SharedIn
 	return controller
 }
 
-// Run will set up the event handlers for types we are interested in, as well
-// as syncing informer caches and starting workers. It will block until stopCh
-// is closed, at which point it will shutdown the workqueue and wait for
-// workers to finish processing their current work items.
-func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
-	c.informerFactory.Start(stopCh)
+/*
+Start the informer, set up the event handlers for types we are interested in,
+as well as syncing informer caches and starting workers. It will block until stop
+is closed, at which point it will shutdown the workqueue and wait for
+workers to finish processing their current work items.
+ */
+func (c *Controller) Run(numWorkers int, stop <-chan struct{}) error {
+	c.informerFactory.Start(stop)
 
 	defer utilruntime.HandleCrash()
 	defer c.workQueue.ShutDown()
@@ -74,7 +76,7 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	klog.Infof("Starting %s", controllerAgentName)
 
 	klog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.synced); !ok {
+	if ok := cache.WaitForCacheSync(stop, c.synced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
@@ -92,17 +94,20 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	klog.Info("Starting workers")
 
 	for i := 0; i < numWorkers; i++ {
-		go wait.Until(c.runWorker, time.Second, stopCh)
+		go wait.Until(c.runWorker, time.Second, stop)
 	}
 
 	klog.Info("Started workers")
-	<-stopCh
+	<-stop
 	klog.Info("Shutting down workers")
 
 	return nil
 }
 
-// runWorker is a long-running function that will continually consume items from the workqueue.
+/*
+A long-running function that will continually consume items from the workqueue.
+It is invoked asynchronously by Run
+*/
 func (c *Controller) runWorker() {
 	for {
 		obj, shutdown := c.workQueue.Get()
@@ -143,7 +148,7 @@ func (c *Controller) runWorker() {
 	}
 }
 
-// asynchronously process a single work item from the queue
+// process a single work item from the queue
 func (c *Controller) processWorkItem(key string) error {
 	klog.Infof("Processing '%s'", key)
 
@@ -167,11 +172,11 @@ func (c *Controller) processWorkItem(key string) error {
 }
 
 func (c *Controller) addReverse(namespace string) error {
-	reversedName := stringutils.Reverse(namespace)
-	reversedNamespace, err := c.informer.Lister().Get(reversedName)
+	reverseName := stringutils.Reverse(namespace)
+	reverseNamespace, err := c.informer.Lister().Get(reverseName)
 
 	if err == nil {
-		klog.Infof("Reverse namespace '%s' already exists, ignoring", reversedName)
+		klog.Infof("Reverse namespace '%s' already exists, ignoring", reverseName)
 		return nil
 	}
 
@@ -179,9 +184,9 @@ func (c *Controller) addReverse(namespace string) error {
 		return err
 	}
 
-	reversedNamespace, err = c.kube.CoreV1().Namespaces().Create(&coreApi.Namespace{
+	reverseNamespace, err = c.kube.CoreV1().Namespaces().Create(&coreApi.Namespace{
 		ObjectMeta: metaApi.ObjectMeta{
-			Name: reversedName,
+			Name: reverseName,
 		},
 	})
 
@@ -189,17 +194,17 @@ func (c *Controller) addReverse(namespace string) error {
 		return err
 	}
 
-	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReverseCreated, MessageReverseCreated)
+	c.eventRecorder.Event(reverseNamespace, coreApi.EventTypeNormal, EventReverseCreated, MessageReverseCreated)
 
 	return nil
 }
 
 func (c *Controller) deleteReverse(namespace string) error {
-	reversedName := stringutils.Reverse(namespace)
-	reversedNamespace, err := c.informer.Lister().Get(reversedName)
+	reverseName := stringutils.Reverse(namespace)
+	reverseNamespace, err := c.informer.Lister().Get(reverseName)
 
 	if errors.IsNotFound(err) {
-		klog.Infof("Reverse namespace '%s' no longer exists, ignoring", reversedName)
+		klog.Infof("Reverse namespace '%s' no longer exists, ignoring", reverseName)
 		return nil
 	}
 
@@ -207,13 +212,13 @@ func (c *Controller) deleteReverse(namespace string) error {
 		return err
 	}
 
-	err = c.kube.CoreV1().Namespaces().Delete(reversedName, &metaApi.DeleteOptions{})
+	err = c.kube.CoreV1().Namespaces().Delete(reverseName, &metaApi.DeleteOptions{})
 
 	if err != nil {
 		return err
 	}
 
-	c.eventRecorder.Event(reversedNamespace, coreApi.EventTypeNormal, EventReverseDeleted, MessageReverseDeleted)
+	c.eventRecorder.Event(reverseNamespace, coreApi.EventTypeNormal, EventReverseDeleted, MessageReverseDeleted)
 
 	return nil
 }
