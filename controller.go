@@ -75,11 +75,11 @@ func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
 	c.informer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			namespace := obj.(*coreApi.Namespace)
-			c.workQueue.Add(serializeCacheKey(EventNamespaceAdded, namespace.Name))
+			c.workQueue.Add(serializeCacheKey(EventNamespaceAdded, namespace))
 		},
 		DeleteFunc: func(obj interface{}) {
 			namespace := obj.(*coreApi.Namespace)
-			c.workQueue.Add(serializeCacheKey(EventNamespaceDeleted, namespace.Name))
+			c.workQueue.Add(serializeCacheKey(EventNamespaceDeleted, namespace))
 		},
 	})
 
@@ -212,11 +212,11 @@ func (c *Controller) deleteReverse(namespace string) error {
 	return nil
 }
 
-func serializeCacheKey(action string, namespace string) string {
-	return fmt.Sprintf("%s %s", action, namespace)
+func serializeCacheKey(action string, namespace *coreApi.Namespace) string {
+	return fmt.Sprintf("%s %s", action, namespace.Name)
 }
 
-func unserializeCacheKey(key string) (action string, namespace string) {
+func unserializeCacheKey(key string) (action string, namespaceName string) {
 	parts := strings.SplitN(key, " ", 2)
 	return parts[0], parts[1]
 }
