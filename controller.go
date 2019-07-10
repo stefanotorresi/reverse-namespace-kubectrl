@@ -11,6 +11,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	_ "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
 	coreInformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -35,23 +36,26 @@ const (
 )
 
 type Controller struct {
-	informer      coreInformers.NamespaceInformer
-	kube          kubernetes.Interface
-	workQueue     workqueue.RateLimitingInterface
-	eventRecorder record.EventRecorder
-	synced        cache.InformerSynced
+	informerFactory informers.SharedInformerFactory
+	informer        coreInformers.NamespaceInformer
+	kube            kubernetes.Interface
+	workQueue       workqueue.RateLimitingInterface
+	eventRecorder   record.EventRecorder
+	synced          cache.InformerSynced
 }
 
-func NewController(kube kubernetes.Interface, informer coreInformers.NamespaceInformer) *Controller {
+func NewController(kube kubernetes.Interface, informerFactory informers.SharedInformerFactory) *Controller {
 	workQueue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerAgentName)
 	eventRecorder := createEventRecorder(kube)
+	informer := informerFactory.Core().V1().Namespaces()
 
 	controller := &Controller{
-		informer:      informer,
-		kube:          kube,
-		workQueue:     workQueue,
-		eventRecorder: eventRecorder,
-		synced:        informer.Informer().HasSynced,
+		informer:        informer,
+		informerFactory: informerFactory,
+		kube:            kube,
+		workQueue:       workQueue,
+		eventRecorder:   eventRecorder,
+		synced:          informer.Informer().HasSynced,
 	}
 
 	return controller
@@ -62,6 +66,8 @@ func NewController(kube kubernetes.Interface, informer coreInformers.NamespaceIn
 // is closed, at which point it will shutdown the workqueue and wait for
 // workers to finish processing their current work items.
 func (c *Controller) Run(numWorkers int, stopCh <-chan struct{}) error {
+	c.informerFactory.Start(stopCh)
+
 	defer utilruntime.HandleCrash()
 	defer c.workQueue.ShutDown()
 

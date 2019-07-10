@@ -30,13 +30,13 @@ type doubles struct {
 func TestCreatesReverseNamespaces(t *testing.T) {
 	namespaces := []*coreApi.Namespace{newNamespace("test")}
 	doubles := newDoubles(namespaces)
-	SUT := newController(doubles.client, doubles.informer)
+	SUT := newController(doubles)
 
-	runController(t, doubles, SUT, time.Second * 10)
+	runController(t, SUT, time.Second * 5, doubles.stopCh)
 
-	waitUntilThereAreNActions(doubles.client, 3)
+	waitUntilThereAreNActions(doubles.client, 3) // list, watch, create
 
-	action := doubles.client.Actions()[2]
+	action := doubles.client.Actions()[2] // last create is what we want
 
 	assertNamespaceCreatedWithName(t, stringutils.Reverse(namespaces[0].Name), action)
 
@@ -49,17 +49,17 @@ func TestDeletesReverseNamespaces(t *testing.T) {
 		newNamespace("tset"),
 	}
 	doubles := newDoubles(namespaces)
-	SUT := newController(doubles.client, doubles.informer)
+	SUT := newController(doubles)
 
-	runController(t, doubles, SUT, time.Second * 5)
+	runController(t, SUT, time.Second * 5, doubles.stopCh)
 
-	waitUntilThereAreNActions(doubles.client, 2) // wait for list and watch
+	waitUntilThereAreNActions(doubles.client, 2) // list, watch
 
-	_ = doubles.client.CoreV1().Namespaces().Delete("test", &metaApi.DeleteOptions{})
+	_ = doubles.client.CoreV1().Namespaces().Delete(namespaces[0].Name, &metaApi.DeleteOptions{})
 
-	waitUntilThereAreNActions(doubles.client, 4)
+	waitUntilThereAreNActions(doubles.client, 4) // delete, delete
 
-	action := doubles.client.Actions()[3]
+	action := doubles.client.Actions()[3] // last delete is what we want
 
 	assertNamespaceDeleted(t, namespaces[1], action)
 
@@ -85,15 +85,6 @@ func assertNamespaceDeleted(t *testing.T, namespace *coreApi.Namespace, action k
 	assert.Equal(t, namespace.Name, deleteAction.GetName())
 }
 
-func waitUntilThereAreNActions(client *kubefake.Clientset, n int)  {
-	stopCh := make(chan struct{})
-	wait.Until(func() {
-		if len(client.Actions()) == n {
-			close(stopCh)
-		}
-	}, time.Millisecond*200, stopCh)
-}
-
 func newDoubles(namespaces []*coreApi.Namespace) *doubles {
 	clientObjects := make([]runtime.Object, len(namespaces))
 
@@ -115,6 +106,26 @@ func newDoubles(namespaces []*coreApi.Namespace) *doubles {
 
 	return f
 }
+func newController(doubles *doubles) *Controller {
+	controller := NewController(doubles.client, doubles.informerFactory)
+	controller.synced = func() bool { return true }
+	controller.eventRecorder = &record.FakeRecorder{}
+
+	return controller
+}
+
+func runController(t *testing.T, controller *Controller, timeout time.Duration, stopCh chan struct{}) {
+	go func() {
+		time.Sleep(timeout)
+		close(stopCh)
+		t.Error("Controller timed out")
+	}()
+
+	go func() {
+		err := controller.Run(1, stopCh)
+		assert.NoError(t, err )
+	}()
+}
 
 func newNamespace(name string) *coreApi.Namespace {
 	return &coreApi.Namespace{
@@ -124,24 +135,13 @@ func newNamespace(name string) *coreApi.Namespace {
 	}
 }
 
-func newController(client *kubefake.Clientset, informer	coreInformes.NamespaceInformer) *Controller {
-	controller := NewController(client, informer)
-	controller.synced = func() bool { return true }
-	controller.eventRecorder = &record.FakeRecorder{}
-
-	return controller
+func waitUntilThereAreNActions(client *kubefake.Clientset, n int)  {
+	stopCh := make(chan struct{})
+	thereAreNActions := func() {
+		if len(client.Actions()) == n {
+			close(stopCh)
+		}
+	}
+	wait.Until(thereAreNActions, time.Millisecond*100, stopCh)
 }
 
-func runController(t *testing.T, doubles *doubles, controller *Controller, timeout time.Duration) {
-	go func() {
-		time.Sleep(timeout)
-		close(doubles.stopCh)
-		t.Error("Controller timed out")
-	}()
-
-	go func() {
-		doubles.informerFactory.Start(doubles.stopCh)
-		err := controller.Run(1, doubles.stopCh)
-		assert.NoError(t, err )
-	}()
-}

@@ -37,11 +37,8 @@ func main() {
 	}
 
 	informerFactory := informers.NewSharedInformerFactory(kube, time.Second*30)
-	informer := informerFactory.Core().V1().Namespaces()
 
-	controller := NewController(kube, informer)
-
-	informerFactory.Start(stopCh)
+	controller := NewController(kube, informerFactory)
 
 	if err = controller.Run(2, stopCh); err != nil {
 		klog.Fatalf("Error running controller: %s", err.Error())
