@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,28 +19,28 @@ import (
 	"reverse-namespace-kubectrl/pkg/stringutils"
 )
 
-type doubles struct {
+const timeout = time.Second * 5
+
+type helpers struct {
+	t *testing.T
 	informerFactory informers.SharedInformerFactory
 	client          *kubefake.Clientset
 	clientObjects   []runtime.Object
-	stop            chan struct{}
 }
 
 func TestCreatesReverseNamespaces(t *testing.T) {
 	namespaces := []*coreApi.Namespace{newNamespace("test")}
-	doubles := newDoubles(namespaces)
-	SUT := newController(doubles)
+	helpers := newHelpers(t, namespaces)
+	SUT := helpers.newController()
 
-	runController(t, SUT, time.Second * 2, doubles.stop)
+	helpers.runController(SUT)
 
-	waitUntilThereAreNActions(doubles.client, 3) // list, watch, create
+	helpers.waitUntilThereAreNActions(3) // list, watch, create
 
-	close(doubles.stop)
-
-	actions := doubles.client.Actions()
+	actions := helpers.client.Actions()
 	action := actions[2] // last create is what we want
 
-	assertNamespaceCreatedWithName(t, stringutils.Reverse(namespaces[0].Name), action)
+	helpers.assertNamespaceCreatedWithName(stringutils.Reverse(namespaces[0].Name), action)
 }
 
 func TestDeletesReverseNamespaces(t *testing.T) {
@@ -47,45 +48,24 @@ func TestDeletesReverseNamespaces(t *testing.T) {
 		newNamespace("test"),
 		newNamespace("tset"),
 	}
-	doubles := newDoubles(namespaces)
-	SUT := newController(doubles)
+	helpers := newHelpers(t, namespaces)
+	SUT := helpers.newController()
 
-	runController(t, SUT, time.Second * 2, doubles.stop)
+	helpers.runController(SUT)
 
-	waitUntilThereAreNActions(doubles.client, 2) // list, watch
+	helpers.waitUntilThereAreNActions(2) // list, watch
 
-	_ = doubles.client.CoreV1().Namespaces().Delete(namespaces[0].Name, &metaApi.DeleteOptions{})
+	_ = helpers.client.CoreV1().Namespaces().Delete(namespaces[0].Name, &metaApi.DeleteOptions{})
 
-	waitUntilThereAreNActions(doubles.client, 4) // delete, delete
+	helpers.waitUntilThereAreNActions(4) // delete, delete
 
-	close(doubles.stop)
-
-	actions := doubles.client.Actions()
+	actions := helpers.client.Actions()
 	action := actions[3] // last delete is what we want
 
-	assertNamespaceDeleted(t, namespaces[1], action)
+	helpers.assertNamespaceDeleted(namespaces[1], action)
 }
 
-func assertNamespaceCreatedWithName(t *testing.T, name string, action kubetesting.Action) {
-	assert.True(t, action.Matches("create", "namespaces"))
-	assert.Implements(t, (*kubetesting.CreateAction)(nil), action)
-
-	var createAction kubetesting.CreateAction
-	createAction = action.(kubetesting.CreateAction)
-	namespace := createAction.GetObject().(*coreApi.Namespace)
-	assert.Equal(t, name, namespace.Name)
-}
-
-func assertNamespaceDeleted(t *testing.T, namespace *coreApi.Namespace, action kubetesting.Action) {
-	assert.True(t, action.Matches("delete", "namespaces"))
-	assert.Implements(t, (*kubetesting.DeleteAction)(nil), action)
-
-	var deleteAction kubetesting.DeleteAction
-	deleteAction = action.(kubetesting.DeleteAction)
-	assert.Equal(t, namespace.Name, deleteAction.GetName())
-}
-
-func newDoubles(namespaces []*coreApi.Namespace) *doubles {
+func newHelpers(t *testing.T, namespaces []*coreApi.Namespace) *helpers {
 	clientObjects := make([]runtime.Object, len(namespaces))
 
 	for i, namespace := range namespaces {
@@ -95,27 +75,68 @@ func newDoubles(namespaces []*coreApi.Namespace) *doubles {
 	client := fake.NewSimpleClientset(clientObjects...)
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 
-	f := &doubles{
+	f := &helpers{
+		t:               t,
 		informerFactory: informerFactory,
 		client:          client,
 		clientObjects:   clientObjects,
-		stop:            make(chan struct{}),
 	}
 
 	return f
 }
-func newController(doubles *doubles) *Controller {
-	controller := NewController(doubles.client, doubles.informerFactory)
+
+func (h *helpers) assertNamespaceCreatedWithName(name string, action kubetesting.Action) {
+	assert.True(h.t, action.Matches("create", "namespaces"))
+	assert.Implements(h.t, (*kubetesting.CreateAction)(nil), action)
+
+	var createAction kubetesting.CreateAction
+	createAction = action.(kubetesting.CreateAction)
+	namespace := createAction.GetObject().(*coreApi.Namespace)
+	assert.Equal(h.t, name, namespace.Name)
+}
+
+func (h *helpers) assertNamespaceDeleted( namespace *coreApi.Namespace, action kubetesting.Action) {
+	assert.True(h.t, action.Matches("delete", "namespaces"))
+	assert.Implements(h.t, (*kubetesting.DeleteAction)(nil), action)
+
+	var deleteAction kubetesting.DeleteAction
+	deleteAction = action.(kubetesting.DeleteAction)
+	assert.Equal(h.t, namespace.Name, deleteAction.GetName())
+}
+
+func (h *helpers) waitUntilThereAreNActions(n int) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	thereAreNActions := func() {
+		actions := h.client.Actions()
+		if len(actions) == n {
+			cancel()
+		}
+	}
+
+	wait.Until(thereAreNActions, time.Millisecond * 500, ctx.Done())
+
+	if err := ctx.Err(); err != nil && err.Error() == "context deadline exceeded" {
+		h.t.Error("not enough client actions recorded before timeout")
+	}
+}
+
+func (h *helpers) newController() *Controller {
+	controller := NewController(h.client, h.informerFactory)
 	controller.synced = func() bool { return true }
 	controller.eventRecorder = &record.FakeRecorder{}
 
 	return controller
 }
 
-func runController(t *testing.T, controller *Controller, timeout time.Duration, stop chan struct{}) {
+func (h *helpers) runController(controller *Controller) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
 	go func() {
-		err := controller.Run(1, stop)
-		assert.NoError(t, err)
+		defer cancel()
+		err := controller.Run(1, ctx.Done())
+		assert.NoError(h.t, err)
 	}()
 }
 
@@ -126,15 +147,3 @@ func newNamespace(name string) *coreApi.Namespace {
 		},
 	}
 }
-
-func waitUntilThereAreNActions(client *kubefake.Clientset, n int)  {
-	stop := make(chan struct{})
-	thereAreNActions := func() {
-		actions := client.Actions()
-		if len(actions) == n {
-			close(stop)
-		}
-	}
-	wait.Until(thereAreNActions, time.Millisecond*200, stop)
-}
-
