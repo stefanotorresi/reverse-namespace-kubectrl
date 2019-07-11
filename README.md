@@ -1,7 +1,7 @@
 Reversed namespaces
 ===================
 
-The first part of the exercise consists in creating a controller that
+This exercise consists in creating a controller that
 reverses all namespaces in the cluster. There's no need to perform any
 further action inside the namespaces.
 
