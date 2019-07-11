@@ -1,4 +1,4 @@
-Reversed namespaces
+Reverse namespaces
 ===================
 
 This exercise consists in creating a controller that
