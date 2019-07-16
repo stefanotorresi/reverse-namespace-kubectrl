@@ -223,11 +223,11 @@ func (c *Controller) deleteReverse(namespace string) error {
 	return nil
 }
 
-func serializeCacheKey(action string, namespace *coreApi.Namespace) string {
-	return fmt.Sprintf("%s %s", action, namespace.Name)
+func serializeCacheKey(event string, namespace *coreApi.Namespace) string {
+	return fmt.Sprintf("%s %s", event, namespace.Name)
 }
 
-func unserializeCacheKey(key string) (action string, namespaceName string) {
+func unserializeCacheKey(key string) (event string, namespaceName string) {
 	parts := strings.SplitN(key, " ", 2)
 	return parts[0], parts[1]
 }
